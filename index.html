@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Group Stage · World Cup Pool</title>
+<title>Dawg House World Cup</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -109,6 +109,7 @@
   .tag.cannibal{color:var(--live);border-color:var(--live);background:rgba(255,90,77,.08)}
   .tag.h2h{color:var(--gold);border-color:var(--gold-deep)}
   .tag.aly{color:var(--win);border-color:var(--win)}
+  .tag.sched{color:var(--mute);border-color:var(--line)}
 
   /* bracket */
   .bracket{display:flex;gap:18px;overflow-x:auto;padding:6px 2px 18px;-webkit-overflow-scrolling:touch}
@@ -163,7 +164,7 @@
   <div class="top-in">
     <div class="brand">
       <div class="crest">🏆</div>
-      <div><h1 id="poolName">The Group Chat Cup</h1><small>North America 2026 · Pool Tracker</small></div>
+      <div><h1 id="poolName">Dawg House World Cup</h1><small>North America 2026 · Pool Tracker</small></div>
     </div>
     <div class="who">
       <label for="userSel">You are</label>
@@ -265,7 +266,7 @@
 
 <script>
 /* ============================== CONFIG ============================== */
-const POOL_NAME = "The Group Chat Cup";
+const POOL_NAME = "Dawg House World Cup";
 
 // Fill these in from Supabase → Project Settings → API. The anon key is
 // SAFE to put here (it's public by design); never put the service_role key
@@ -505,6 +506,23 @@ function renderStandings(odds){
 
 /* ============================== RENDER: MATCHES ============================== */
 let matchFilter="all";
+function groupsFromTeams(){
+  const map={};
+  Object.entries(TEAMS).forEach(([name,t])=>{
+    if(t.g==="—") return; // didn't qualify — not part of a group
+    (map[t.g]=map[t.g]||[]).push(name);
+  });
+  return map;
+}
+function roundRobinPairs(teams){
+  const pairs=[];
+  for(let i=0;i<teams.length;i++) for(let j=i+1;j<teams.length;j++) pairs.push([teams[i],teams[j]]);
+  return pairs;
+}
+function findResult(a,b){
+  // RESULTS rows: [home,homeGoals,away,awayGoals,date,group]
+  return RESULTS.find(m=>(m[0]===a&&m[2]===b)||(m[0]===b&&m[2]===a));
+}
 function renderMatches(){
   const me=$("#userSel").value, r=getRosters();
   // filters
@@ -516,37 +534,49 @@ function renderMatches(){
 
   let html="";
   if(matchFilter!=="r32"){
-    // group results
-    const byG={};
-    RESULTS.forEach(m=>{(byG[m[5]]=byG[m[5]]||[]).push(m);});
-    Object.keys(byG).sort().forEach(g=>{
-      const ms=byG[g].filter(m=>matchFilter!=="mine"||r[me].includes(m[0])||r[me].includes(m[2]));
-      if(!ms.length)return;
+    // Every group fixture — played (with score) or scheduled (no score yet).
+    // Regenerates from current group rosters each render, so a live refresh
+    // that adds a finished result immediately flips that row from
+    // "Scheduled" to a final score with no other changes needed.
+    const groups=groupsFromTeams();
+    Object.keys(groups).sort().forEach(g=>{
+      const rows=roundRobinPairs(groups[g]).map(([a,b])=>({a,b,res:findResult(a,b)}));
+      const filtered=rows.filter(x=>matchFilter!=="mine"||r[me].includes(x.a)||r[me].includes(x.b));
+      if(!filtered.length)return;
+      filtered.sort((x,y)=>{
+        if(x.res&&!y.res)return -1;
+        if(!x.res&&y.res)return 1;
+        if(x.res&&y.res)return (x.res[4]||"").localeCompare(y.res[4]||"");
+        return 0;
+      });
       html+=`<div class="gname">Group ${g}</div>`;
-      ms.forEach(m=>{
-        const hw=m[1]>m[3], aw=m[3]>m[1];
-        html+=`<div class="match"><div class="meta"><span>${m[4]}</span><span>Final</span></div>
-          <div class="row ${hw?'win':''}"><span class="fl">${teamObj(m[0]).fl}</span><span class="nm">${m[0]} <span class="own">${ownerOf(m[0])}</span></span><span class="sc">${m[1]}</span></div>
-          <div class="row ${aw?'win':''}"><span class="fl">${teamObj(m[2]).fl}</span><span class="nm">${m[2]} <span class="own">${ownerOf(m[2])}</span></span><span class="sc">${m[3]}</span></div>
-        </div>`;
+      filtered.forEach(({a,b,res})=>{
+        if(res){
+          const [home,hg,away,ag,date]=res; const hw=hg>ag, aw=ag>hg;
+          html+=`<div class="match"><div class="meta"><span>${date||''}</span><span>Final</span></div>
+            <div class="row ${hw?'win':''}"><span class="fl">${teamObj(home).fl}</span><span class="nm">${home} <span class="own">${ownerOf(home)}</span></span><span class="sc">${hg}</span></div>
+            <div class="row ${aw?'win':''}"><span class="fl">${teamObj(away).fl}</span><span class="nm">${away} <span class="own">${ownerOf(away)}</span></span><span class="sc">${ag}</span></div>
+          </div>`;
+        } else {
+          html+=`<div class="match"><div class="meta"><span>Group ${g}</span><span class="tag sched">Scheduled</span></div>
+            <div class="row"><span class="fl">${teamObj(a).fl}</span><span class="nm">${a} <span class="own">${ownerOf(a)}</span></span></div>
+            <div class="row"><span class="fl">${teamObj(b).fl}</span><span class="nm">${b} <span class="own">${ownerOf(b)}</span></span></div>
+          </div>`;
+        }
       });
     });
   }
-  if(matchFilter!=="mine" || true){
-    // R32 fixtures
-    const r32 = R32.filter(m=>matchFilter!=="mine"||r[me].includes(m[0])||r[me].includes(m[1]));
-    if(matchFilter!=="all"||true){
-      const show = matchFilter==="r32"? R32 : (matchFilter==="mine"? r32 : []);
-      if(show.length){ html+=`<div class="gname">Round of 32 · as it stands</div>`;
-        show.forEach(m=>{
-          const o1=ownerOf(m[0]),o2=ownerOf(m[1]);const cann=o1===o2&&o1!=="House";
-          html+=`<div class="match"><div class="meta"><span>${m[2]}</span>${cann?'<span class="tag cannibal">Cannibal</span>':''}</div>
-            <div class="row"><span class="fl">${teamObj(m[0]).fl}</span><span class="nm">${m[0]} <span class="own">${o1}</span></span></div>
-            <div class="row"><span class="fl">${teamObj(m[1]).fl}</span><span class="nm">${m[1]} <span class="own">${o2}</span></span></div>
-          </div>`;
-        });
-      }
-    }
+  // Round of 32 "as it stands" — projected from current standings, not yet played.
+  // Shown on "All" and "R32 as it stands"; on "My teams" only your own matchups.
+  const r32 = matchFilter==="mine" ? R32.filter(m=>r[me].includes(m[0])||r[me].includes(m[1])) : R32;
+  if(r32.length){ html+=`<div class="gname">Round of 32 · as it stands</div>`;
+    r32.forEach(m=>{
+      const o1=ownerOf(m[0]),o2=ownerOf(m[1]);const cann=o1===o2&&o1!=="House";
+      html+=`<div class="match"><div class="meta"><span>${m[2]}</span>${cann?'<span class="tag cannibal">Cannibal</span>':''}</div>
+        <div class="row"><span class="fl">${teamObj(m[0]).fl}</span><span class="nm">${m[0]} <span class="own">${o1}</span></span></div>
+        <div class="row"><span class="fl">${teamObj(m[1]).fl}</span><span class="nm">${m[1]} <span class="own">${o2}</span></span></div>
+      </div>`;
+    });
   }
   $("#matchList").innerHTML = html || `<div class="note">Nothing here yet for this filter.</div>`;
 }
@@ -579,20 +609,30 @@ function renderBracket(){
 }
 
 /* ============================== MONTE CARLO ============================== */
+function effStrength(team){
+  const t=TEAMS[team]; if(!t) return 45;
+  const base=t.str||45;
+  if(!t.pld) return base; // no games played yet — fall back to preseason rating
+  // Neutral baseline assumes ~1 point/game; reward points and goal difference above that.
+  const formRaw = 50 + (t.pts - t.pld)*6 + t.gd*2.5;
+  const form = Math.max(10, Math.min(95, formRaw));
+  // Blend: rating still anchors the estimate, but real results now move it.
+  return base*0.6 + form*0.4;
+}
 function pWin(sa,sb){return 1/(1+Math.pow(10,-((sa-sb)/40)));}
 function simOnce(){
   const r=getRosters();
   const ownerCache={}; PLAYERS.forEach(p=>r[p].forEach(t=>ownerCache[t]=p));
   // R32 winners
-  let w32=R32.map(m=>{const a=m[0],b=m[1];return Math.random()<pWin(teamObj(a).str,teamObj(b).str)?a:b;});
+  let w32=R32.map(m=>{const a=m[0],b=m[1];return Math.random()<pWin(effStrength(a),effStrength(b))?a:b;});
   // R16
-  let w16=R16P.map(pr=>{const a=w32[pr[0]],b=w32[pr[1]];return Math.random()<pWin(teamObj(a).str,teamObj(b).str)?a:b;});
+  let w16=R16P.map(pr=>{const a=w32[pr[0]],b=w32[pr[1]];return Math.random()<pWin(effStrength(a),effStrength(b))?a:b;});
   // QF (pair 0-1,2-3,4-5,6-7)
-  let qf=[];for(let i=0;i<8;i+=2){const a=w16[i],b=w16[i+1];qf.push(Math.random()<pWin(teamObj(a).str,teamObj(b).str)?a:b);}
+  let qf=[];for(let i=0;i<8;i+=2){const a=w16[i],b=w16[i+1];qf.push(Math.random()<pWin(effStrength(a),effStrength(b))?a:b);}
   // SF (0-1,2-3)
-  let sf=[];for(let i=0;i<4;i+=2){const a=qf[i],b=qf[i+1];sf.push(Math.random()<pWin(teamObj(a).str,teamObj(b).str)?a:b);}
+  let sf=[];for(let i=0;i<4;i+=2){const a=qf[i],b=qf[i+1];sf.push(Math.random()<pWin(effStrength(a),effStrength(b))?a:b);}
   // Final
-  const champ=Math.random()<pWin(teamObj(sf[0]).str,teamObj(sf[1]).str)?sf[0]:sf[1];
+  const champ=Math.random()<pWin(effStrength(sf[0]),effStrength(sf[1]))?sf[0]:sf[1];
   return {champ,owner:ownerCache[champ]||"House"};
 }
 function runSim(N=20000){
