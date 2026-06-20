@@ -9,8 +9,12 @@
 //   FOOTBALL_DATA_KEY      (from your football-data.org account)
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const FOOTBALL_DATA_KEY = process.env.FOOTBALL_DATA_KEY;
+const SUPABASE_SERVICE_KEY = (process.env.SUPABASE_SERVICE_KEY || "").trim();
+const FOOTBALL_DATA_KEY = (process.env.FOOTBALL_DATA_KEY || "").trim();
+// Strip any trailing slash(es) — a pasted URL like "https://xxxx.supabase.co/"
+// would otherwise produce a double slash in the REST path below, which
+// Supabase/PostgREST rejects with "PGRST125: Invalid path specified".
+const SUPABASE_BASE = (SUPABASE_URL || "").trim().replace(/\/+$/, "");
 
 // football-data.org sometimes names teams differently than our roster list.
 // Add to this if you spot a mismatch in the refresh response.
@@ -132,13 +136,13 @@ module.exports = async (req, res) => {
   };
 
   try {
-    const r1 = await fetch(`${SUPABASE_URL}/rest/v1/teams_state?on_conflict=team`, {
+    const r1 = await fetch(`${SUPABASE_BASE}/rest/v1/teams_state?on_conflict=team`, {
       method: "POST", headers, body: JSON.stringify(teamRows)
     });
     if (!r1.ok) throw new Error("teams_state upsert failed: " + (await r1.text()));
 
     if (finishedResults.length) {
-      const r2 = await fetch(`${SUPABASE_URL}/rest/v1/results?on_conflict=home,away`, {
+      const r2 = await fetch(`${SUPABASE_BASE}/rest/v1/results?on_conflict=home,away`, {
         method: "POST", headers, body: JSON.stringify(finishedResults)
       });
       if (!r2.ok) throw new Error("results upsert failed: " + (await r2.text()));
