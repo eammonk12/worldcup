@@ -185,6 +185,7 @@
     <p class="eyebrow">Your campaign</p>
     <h2 class="section-h" id="myTitle">My teams</h2>
     <p class="lead" id="mySummary"></p>
+    <div class="card" id="todayCard" style="margin-bottom:18px"></div>
     <div id="myCards" class="grid c2"></div>
   </section>
 
@@ -234,6 +235,18 @@
     <div id="oddsPeople"></div>
     <div class="gname">Title odds by team</div>
     <div id="oddsTeams" class="card"></div>
+  </section>
+
+  <!-- HEAD TO HEAD -->
+  <section class="view" id="view-h2h" role="tabpanel">
+    <p class="eyebrow">For bragging rights</p>
+    <h2 class="section-h">Head-to-head</h2>
+    <p class="lead">Every group-stage result where one of your teams has actually played a friend's, tallied up across the whole pool. Rows are wins for that person.</p>
+    <div class="card" style="overflow-x:auto">
+      <table id="h2hTable"></table>
+    </div>
+    <div class="gname">Bragging rights</div>
+    <div id="h2hSummary" class="grid c2"></div>
   </section>
 
   <!-- TRADES -->
@@ -422,7 +435,7 @@ function getRosters(){
 }
 
 /* ============================== TABS ============================== */
-const TABS=[["my","My teams"],["standings","Standings"],["matches","Matches"],["bracket","Bracket"],["odds","Odds"],["trades","Trades"]];
+const TABS=[["my","My teams"],["standings","Standings"],["matches","Matches"],["bracket","Bracket"],["odds","Odds"],["h2h","Head-to-Head"],["trades","Trades"]];
 function buildTabs(){
   const bar=$("#tabBar");
   TABS.forEach(([id,label],i)=>{
@@ -443,7 +456,58 @@ function selectTab(id,btn){
 }
 
 /* ============================== RENDER: MY TEAMS ============================== */
+// Parses a casual date string like "Jun 14" or "Mon Jun 29" or "Wed Jul 1" into
+// a real Date (assumes 2026 — the only year this site is used for).
+function fixtureDate(str){
+  const m=(str||"").match(/([A-Za-z]{3})\w*\s+(\d{1,2})/);
+  if(!m) return null;
+  const months={Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+  const mon=months[m[1]]; if(mon===undefined) return null;
+  return new Date(2026,mon,parseInt(m[2],10));
+}
+function sameDay(a,b){ return !!a && !!b && a.toDateString()===b.toDateString(); }
+function renderToday(){
+  const me=$("#userSel").value, r=getRosters();
+  const mine=new Set(r[me]);
+  const today=new Date();
+  const todayLabel=today.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"});
+
+  const finishedToday = RESULTS.filter(m=>(mine.has(m[0])||mine.has(m[2])) && sameDay(fixtureDate(m[4]),today));
+  const upcomingToday = R32.filter(m=>(mine.has(m[0])||mine.has(m[1])) && sameDay(fixtureDate(m[2]),today));
+
+  let body="";
+  if(finishedToday.length || upcomingToday.length){
+    finishedToday.forEach(m=>{
+      const hw=m[1]>m[3], aw=m[3]>m[1];
+      body+=`<div class="row ${hw?'win':''}"><span class="fl">${teamObj(m[0]).fl}</span><span class="nm">${m[0]}</span><span class="sc">${m[1]}</span></div>
+        <div class="row ${aw?'win':''}"><span class="fl">${teamObj(m[2]).fl}</span><span class="nm">${m[2]}</span><span class="sc">${m[3]}</span></div>
+        <div style="border-top:1px solid var(--line);margin:8px 0"></div>`;
+    });
+    upcomingToday.forEach(m=>{
+      body+=`<div class="row"><span class="fl">${teamObj(m[0]).fl}</span><span class="nm">${m[0]}</span></div>
+        <div class="row"><span class="fl">${teamObj(m[1]).fl}</span><span class="nm">${m[1]} <span class="tag h2h" style="margin-left:8px">Today</span></span></div>
+        <div style="border-top:1px solid var(--line);margin:8px 0"></div>`;
+    });
+  } else {
+    // No game today — fall back to the next known kickoff. Real per-fixture
+    // dates only exist for matches already played and for the R32 round,
+    // so that's the only source we can check ahead of time.
+    const upcoming = R32.filter(m=>mine.has(m[0])||mine.has(m[1]))
+      .map(m=>({m,d:fixtureDate(m[2])})).filter(x=>x.d && x.d>=today)
+      .sort((a,b)=>a.d-b.d);
+    if(upcoming.length){
+      const {m}=upcoming[0];
+      body=`<div class="note">Nothing today. Next up for ${me} — <b>${m[2]}</b>:</div>
+        <div class="row" style="margin-top:8px"><span class="fl">${teamObj(m[0]).fl}</span><span class="nm">${m[0]}</span></div>
+        <div class="row"><span class="fl">${teamObj(m[1]).fl}</span><span class="nm">${m[1]}</span></div>`;
+    } else {
+      body=`<div class="note">Nothing scheduled for ${me}'s teams today. Kickoff dates for group games that haven't been played yet aren't tracked individually — check the Matches tab for the full picture.</div>`;
+    }
+  }
+  $("#todayCard").innerHTML = `<div class="gname" style="margin-top:0">🗓️ Today · ${todayLabel}</div>${body}`;
+}
 function renderMy(){
+  renderToday();
   const me=$("#userSel").value;
   const r=getRosters();
   $("#myTitle").textContent = me+"'s teams";
@@ -660,6 +724,74 @@ function renderOdds(){
     tt.map(([t,v])=>`<tr><td>${teamObj(t).fl} ${t}</td><td style="color:var(--mute)">${ownerOf(t)}</td><td class="n">${(v*100).toFixed(1)}%</td></tr>`).join("")+`</table>`;
 }
 
+/* ============================== RENDER: HEAD-TO-HEAD ============================== */
+function computeH2H(){
+  const r=getRosters();
+  const ownerOfTeam={}; PLAYERS.forEach(p=>r[p].forEach(t=>ownerOfTeam[t]=p));
+  const rec={}; PLAYERS.forEach(p=>{rec[p]={}; PLAYERS.forEach(q=>{ if(p!==q) rec[p][q]={w:0,d:0,l:0,gf:0,ga:0}; });});
+  RESULTS.forEach(m=>{
+    const [home,hg,away,ag]=m;
+    const po=ownerOfTeam[home], qo=ownerOfTeam[away];
+    if(!po||!qo||po===qo||!rec[po]||!rec[po][qo])return; // skip unowned or in-house matches
+    rec[po][qo].gf+=hg; rec[po][qo].ga+=ag;
+    rec[qo][po].gf+=ag; rec[qo][po].ga+=hg;
+    if(hg>ag){ rec[po][qo].w++; rec[qo][po].l++; }
+    else if(ag>hg){ rec[qo][po].w++; rec[po][qo].l++; }
+    else { rec[po][qo].d++; rec[qo][po].d++; }
+  });
+  return rec;
+}
+function renderH2H(){
+  const rec=computeH2H(); const me=$("#userSel").value;
+  const thead='<tr><th></th>'+PLAYERS.map(p=>`<th>${p}</th>`).join('')+'</tr>';
+  const rows=PLAYERS.map(p=>{
+    const cells=PLAYERS.map(q=>{
+      if(p===q) return '<td class="n" style="color:var(--mute)">—</td>';
+      const x=rec[p][q], total=x.w+x.d+x.l;
+      if(!total) return '<td class="n" style="color:var(--mute)">—</td>';
+      const color = x.w>x.l?'var(--win)':x.w<x.l?'var(--live)':'var(--chalk)';
+      return `<td class="n" style="color:${color};font-weight:700">${x.w}-${x.d}-${x.l}</td>`;
+    }).join('');
+    return `<tr><th style="color:${p===me?'var(--gold)':'inherit'}">${p}${p===me?' (you)':''}</th>${cells}</tr>`;
+  }).join('');
+  $("#h2hTable").innerHTML = `<thead>${thead}</thead><tbody>${rows}</tbody>`;
+
+  const totals=PLAYERS.map(p=>{
+    let w=0,d=0,l=0,gf=0,ga=0;
+    PLAYERS.forEach(q=>{ if(p===q)return; const x=rec[p][q]; w+=x.w;d+=x.d;l+=x.l;gf+=x.gf;ga+=x.ga; });
+    return {p,w,d,l,gf,ga,played:w+d+l};
+  }).sort((a,b)=>(b.w-b.l)-(a.w-a.l) || b.w-a.w);
+
+  let best=null;
+  for(let i=0;i<PLAYERS.length;i++) for(let j=i+1;j<PLAYERS.length;j++){
+    const p=PLAYERS[i],q=PLAYERS[j], x=rec[p][q], total=x.w+x.d+x.l;
+    if(!total) continue;
+    const diff=Math.abs(x.w-x.l);
+    if(!best||diff>best.diff){
+      const leaderIsP = x.w>=x.l;
+      best={p:leaderIsP?p:q, q:leaderIsP?q:p, w:leaderIsP?x.w:x.l, l:leaderIsP?x.l:x.w, d:x.d, diff};
+    }
+  }
+
+  $("#h2hSummary").innerHTML = `
+    <div class="card">
+      <div class="gname" style="margin-top:0">Overall head-to-head record</div>
+      ${totals.map((t,i)=>`<div class="lb-row ${t.p===me?'me':''}" style="margin-bottom:8px">
+        <div class="rank ${i===0&&t.played?'gold':''}">${i+1}</div>
+        <div><div class="lb-name">${t.p}${i===0&&t.played?' 👑':''}</div>
+          <div class="lb-sub">${t.played} matchups played · ${t.gf}-${t.ga} GF-GA</div></div>
+        <div class="pct">${t.w}-${t.d}-${t.l}<small>W-D-L</small></div>
+      </div>`).join('')}
+    </div>
+    <div class="card">
+      <div class="gname" style="margin-top:0">Most one-sided rivalry</div>
+      ${best?`<div style="font-size:15px;line-height:1.7">
+        <b style="color:var(--gold)">${best.p}</b> is dominating <b>${best.q}</b> head-to-head
+        <div class="pct" style="text-align:left;margin-top:6px">${best.w}-${best.d}-${best.l}<small>W-D-L</small></div>
+      </div>`:`<div class="note">Not enough head-to-head matches played yet — check back after a few more group games.</div>`}
+    </div>`;
+}
+
 /* ============================== TRADES ============================== */
 function fillTradeSelects(){
   const me=$("#userSel").value,r=getRosters();
@@ -782,7 +914,7 @@ $("#refreshBtn") && ($("#refreshBtn").onclick=async()=>{
 /* ============================== INIT ============================== */
 function refreshAll(){
   ODDS = ODDS || runSim();
-  renderMy();renderStandings(ODDS);renderMatches();renderBracket();renderOdds();fillTradeSelects();renderTrades();
+  renderMy();renderStandings(ODDS);renderMatches();renderBracket();renderOdds();renderH2H();fillTradeSelects();renderTrades();
 }
 async function init(){
   $("#poolName").textContent=POOL_NAME;
